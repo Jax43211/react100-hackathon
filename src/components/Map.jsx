@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
-import { fetchUSFlights, metersToFeet, msToKnots } from "../services/flightAPI";
+import {
+  fetchUSFlights,
+  metersToFeet,
+  msToKnots,
+  getAirlineColor,
+} from "../services/flightAPI";
 import { createPlaneIcon } from "../utils/helpers";
 import "leaflet/dist/leaflet.css";
+import { fetchWeatherCached } from "../services/weatherAPI";
+import WeatherPanel from "./WeatherPanel";
 
 const MapComponent = () => {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [selectedFlight, setSelectedFlight] = useState(null);
+  const [weather, setWeather] = useState(null);
+  const [loadingWeather, setLoadingWeather] = useState(false);
   const mapContainer = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef(new Map());
@@ -56,7 +66,7 @@ const MapComponent = () => {
     };
 
     fetchFlights();
-    const interval = setInterval(fetchFlights, 120000);
+    const interval = setInterval(fetchFlights, 120000000);
 
     return () => clearInterval(interval);
   }, []);
@@ -83,7 +93,12 @@ const MapComponent = () => {
       if (existingMarker) {
         // Update existing marker position and icon
         existingMarker.setLatLng([flight.latitude, flight.longitude]);
-        existingMarker.setIcon(createPlaneIcon(flight.heading));
+        existingMarker.setIcon(
+          createPlaneIcon(
+            flight.heading,
+            getAirlineColor(flight.callsign, flight.origin_country)
+          )
+        );
 
         // Update popup content (only if popup is open to avoid lag)
         if (existingMarker.isPopupOpen()) {
@@ -92,13 +107,26 @@ const MapComponent = () => {
       } else {
         // Create new marker
         const marker = L.marker([flight.latitude, flight.longitude], {
-          icon: createPlaneIcon(flight.heading),
+          icon: createPlaneIcon(
+            flight.heading,
+            getAirlineColor(flight.callsign, flight.origin_country)
+          ),
           riseOnHover: true,
         }).addTo(mapInstance.current);
 
         // Bind popup (lazy load content on click)
-        marker.on("click", () => {
+        marker.on("click", async () => {
+          setSelectedFlight(flight);
+          setLoadingWeather(true);
           marker.bindPopup(createPopupContent(flight)).openPopup();
+
+          // Fetch weather data
+          const weatherData = await fetchWeatherCached(
+            flight.latitude,
+            flight.longitude
+          );
+          setWeather(weatherData);
+          setLoadingWeather(false);
         });
 
         currentMarkers.set(flight.icao24, marker);
@@ -108,15 +136,27 @@ const MapComponent = () => {
 
   // Helper function to create popup HTML
   const createPopupContent = (flight) => {
+    const color = getAirlineColor(flight.callsign, flight.origin_country);
+    const airlineEmoji =
+      flight.callsign.startsWith("RCH") ||
+      flight.callsign.match(/^(FOR|TANK|VIP)/)
+        ? "🛫⚔️"
+        : "✈️";
+
     return `
-      <div class="text-sm">
-        <h3 class="font-bold text-lg">${flight.callsign}</h3>
-        <p><strong>Country:</strong> ${flight.origin_country}</p>
-        <p><strong>Altitude:</strong> ${metersToFeet(flight.altitude)} ft</p>
-        <p><strong>Speed:</strong> ${msToKnots(flight.velocity)} knots</p>
-        <p><strong>Heading:</strong> ${Math.round(flight.heading)}°</p>
+    <div class="text-sm">
+      <div class="flex items-center mb-2">
+        <span class="text-2xl mr-2">${airlineEmoji}</span>
+        <h3 class="font-bold text-lg" style="color: ${color}">${
+      flight.callsign
+    }</h3>
       </div>
-    `;
+      <p><strong>Country:</strong> ${flight.origin_country}</p>
+      <p><strong>Altitude:</strong> ${metersToFeet(flight.altitude)} ft</p>
+      <p><strong>Speed:</strong> ${msToKnots(flight.velocity)} knots</p>
+      <p><strong>Heading:</strong> ${Math.round(flight.heading)}°</p>      
+    </div>
+  `;
   };
 
   return (
@@ -140,6 +180,16 @@ const MapComponent = () => {
           🛫 Tracking {flights.length} flights over US
           {loading && <span className="text-blue-500 ml-2">• Updating...</span>}
         </p>
+      </div>
+      {/* Weather Panel */}
+      <div className="absolute top-4 right-4 z-1000">
+        {loadingWeather ? (
+          <div className="bg-white p-4 rounded-lg shadow-lg">
+            <p className="text-gray-600">Loading weather...</p>
+          </div>
+        ) : (
+          <WeatherPanel weather={weather} flight={selectedFlight} />
+        )}
       </div>
     </div>
   );
