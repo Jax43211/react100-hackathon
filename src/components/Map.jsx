@@ -11,7 +11,26 @@ import "leaflet/dist/leaflet.css";
 import { fetchWeatherCached } from "../services/weatherAPI";
 import WeatherPanel from "./WeatherPanel";
 
-const MapComponent = () => {
+function throttle(func, delay) {
+  let timeoutId;
+  let lastRan;
+  return function (...args) {
+    if (!lastRan) {
+      func.apply(this, args);
+      lastRan = Date.now();
+    } else {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (Date.now() - lastRan >= delay) {
+          func.apply(this, args);
+          lastRan = Date.now();
+        }
+      }, delay - (Date.now() - lastRan));
+    }
+  };
+}
+
+const MapComponent = ({ onFlightsUpdate, filteredFlights }) => {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
@@ -22,6 +41,9 @@ const MapComponent = () => {
   const mapInstance = useRef(null);
   const markersRef = useRef(new Map());
 
+  // Use filtered flights if searching, otherwise all flights
+  const displayedFlights = filteredFlights !== null ? filteredFlights : flights;
+
   // Initialize map once
   useEffect(() => {
     if (!mapContainer.current || mapInstance.current) return;
@@ -30,21 +52,34 @@ const MapComponent = () => {
     mapInstance.current = L.map(mapContainer.current, {
       minZoom: 4,
       maxZoom: 10,
-      preferCanvas: true, // Use canvas for better performance
-    }).setView([39.8283, -98.5795], 5); // Center on US
+      preferCanvas: true,
+    }).setView([39.8283, -98.5795], 5);
 
     // Add tile layer with performance optimizations
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
       maxZoom: 19,
-      updateWhenIdle: true, // Only update tiles when map stops moving
-      updateWhenZooming: false, // Don't update while zooming
-      keepBuffer: 2, // Keep tiles in buffer for smoother panning
+      updateWhenIdle: true,
+      updateWhenZooming: false,
+      keepBuffer: 2,
     }).addTo(mapInstance.current);
 
     // Mark map as ready when tiles load
     mapInstance.current.whenReady(() => {
       setMapReady(true);
+    });
+
+    mapInstance.current.on("click", () => {
+      setSelectedFlight(null);
+      setWeather(null);
+      setLoadingWeather(false);
+
+      // Close any open popups
+      mapInstance.current.eachLayer((layer) => {
+        if (layer.closePopup) {
+          layer.closePopup();
+        }
+      });
     });
 
     // Cleanup on unmount
@@ -62,77 +97,88 @@ const MapComponent = () => {
       setLoading(true);
       const flightData = await fetchUSFlights();
       setFlights(flightData);
+
+      // Send flights up to App.jsx for SearchBar
+      if (onFlightsUpdate) {
+        onFlightsUpdate(flightData);
+      }
+
       setLoading(false);
     };
 
     fetchFlights();
-    const interval = setInterval(fetchFlights, 120000000);
+    const interval = setInterval(fetchFlights, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [onFlightsUpdate]);
 
   // Smart marker updates - only update what changed
   useEffect(() => {
     if (!mapInstance.current) return;
 
-    const currentMarkers = markersRef.current;
-    const newFlightIds = new Set(flights.map((f) => f.icao24));
+    const updateMarkers = () => {
+      const currentMarkers = markersRef.current;
+      const newFlightIds = new Set(displayedFlights.map((f) => f.icao24));
 
-    // Remove markers for flights that are no longer present
-    currentMarkers.forEach((marker, icao24) => {
-      if (!newFlightIds.has(icao24)) {
-        marker.remove();
-        currentMarkers.delete(icao24);
-      }
-    });
-
-    // Update or add markers
-    flights.forEach((flight) => {
-      const existingMarker = currentMarkers.get(flight.icao24);
-
-      if (existingMarker) {
-        // Update existing marker position and icon
-        existingMarker.setLatLng([flight.latitude, flight.longitude]);
-        existingMarker.setIcon(
-          createPlaneIcon(
-            flight.heading,
-            getAirlineColor(flight.callsign, flight.origin_country)
-          )
-        );
-
-        // Update popup content (only if popup is open to avoid lag)
-        if (existingMarker.isPopupOpen()) {
-          existingMarker.setPopupContent(createPopupContent(flight));
+      // Remove markers for flights that are no longer present
+      currentMarkers.forEach((marker, icao24) => {
+        if (!newFlightIds.has(icao24)) {
+          marker.remove();
+          currentMarkers.delete(icao24);
         }
-      } else {
-        // Create new marker
-        const marker = L.marker([flight.latitude, flight.longitude], {
-          icon: createPlaneIcon(
-            flight.heading,
-            getAirlineColor(flight.callsign, flight.origin_country)
-          ),
-          riseOnHover: true,
-        }).addTo(mapInstance.current);
+      });
 
-        // Bind popup (lazy load content on click)
-        marker.on("click", async () => {
-          setSelectedFlight(flight);
-          setLoadingWeather(true);
-          marker.bindPopup(createPopupContent(flight)).openPopup();
+      // Batch DOM operations using requestAnimationFrame
+      requestAnimationFrame(() => {
+        displayedFlights.forEach((flight) => {
+          const existingMarker = currentMarkers.get(flight.icao24);
 
-          // Fetch weather data
-          const weatherData = await fetchWeatherCached(
-            flight.latitude,
-            flight.longitude
-          );
-          setWeather(weatherData);
-          setLoadingWeather(false);
+          if (existingMarker) {
+            // Update existing marker
+            existingMarker.setLatLng([flight.latitude, flight.longitude]);
+            existingMarker.setIcon(
+              createPlaneIcon(
+                flight.heading,
+                getAirlineColor(flight.callsign, flight.origin_country)
+              )
+            );
+
+            if (existingMarker.isPopupOpen()) {
+              existingMarker.setPopupContent(createPopupContent(flight));
+            }
+          } else {
+            // Create new marker
+            const marker = L.marker([flight.latitude, flight.longitude], {
+              icon: createPlaneIcon(
+                flight.heading,
+                getAirlineColor(flight.callsign, flight.origin_country)
+              ),
+              riseOnHover: true,
+            }).addTo(mapInstance.current);
+
+            marker.on("click", async () => {
+              setSelectedFlight(flight);
+              setLoadingWeather(true);
+              marker.bindPopup(createPopupContent(flight)).openPopup();
+
+              const weatherData = await fetchWeatherCached(
+                flight.latitude,
+                flight.longitude
+              );
+              setWeather(weatherData);
+              setLoadingWeather(false);
+            });
+
+            currentMarkers.set(flight.icao24, marker);
+          }
         });
+      });
+    };
 
-        currentMarkers.set(flight.icao24, marker);
-      }
-    });
-  }, [flights]);
+    // Throttle updates to max once per 500ms
+    const throttledUpdate = throttle(updateMarkers, 500);
+    throttledUpdate();
+  }, [displayedFlights]);
 
   // Helper function to create popup HTML
   const createPopupContent = (flight) => {
@@ -144,19 +190,19 @@ const MapComponent = () => {
         : "✈️";
 
     return `
-    <div class="text-sm">
-      <div class="flex items-center mb-2">
-        <span class="text-2xl mr-2">${airlineEmoji}</span>
-        <h3 class="font-bold text-lg" style="color: ${color}">${
+      <div class="text-sm">
+        <div class="flex items-center mb-2">
+          <span class="text-2xl mr-2">${airlineEmoji}</span>
+          <h3 class="font-bold text-lg" style="color: ${color}">${
       flight.callsign
     }</h3>
+        </div>
+        <p><strong>Country:</strong> ${flight.origin_country}</p>
+        <p><strong>Altitude:</strong> ${metersToFeet(flight.altitude)} ft</p>
+        <p><strong>Speed:</strong> ${msToKnots(flight.velocity)} knots</p>
+        <p><strong>Heading:</strong> ${Math.round(flight.heading)}°</p>      
       </div>
-      <p><strong>Country:</strong> ${flight.origin_country}</p>
-      <p><strong>Altitude:</strong> ${metersToFeet(flight.altitude)} ft</p>
-      <p><strong>Speed:</strong> ${msToKnots(flight.velocity)} knots</p>
-      <p><strong>Heading:</strong> ${Math.round(flight.heading)}°</p>      
-    </div>
-  `;
+    `;
   };
 
   return (
@@ -177,10 +223,18 @@ const MapComponent = () => {
       {/* Flight counter overlay */}
       <div className="absolute top-4 left-4 z-1000 bg-white p-3 rounded-lg shadow-lg">
         <p className="text-sm font-semibold">
-          🛫 Tracking {flights.length} flights over US
+          🛫{" "}
+          {filteredFlights !== null ? (
+            <>
+              Showing {displayedFlights.length} of {flights.length} flights
+            </>
+          ) : (
+            <>Tracking {displayedFlights.length} flights over US</>
+          )}
           {loading && <span className="text-blue-500 ml-2">• Updating...</span>}
         </p>
       </div>
+
       {/* Weather Panel */}
       <div className="absolute top-4 right-4 z-1000">
         {loadingWeather ? (

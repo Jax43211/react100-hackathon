@@ -1,1 +1,32 @@
 @import "tailwindcss";
+
+/* Map styling */
+#map {
+  width: 100%;
+  height: 100%;
+}
+
+/* Hardware acceleration for smoother animations */
+.plane-icon {
+  background: none !important;
+  border: none !important;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Optimize Leaflet marker rendering */
+.leaflet-marker-icon {
+  transition: transform 0.5s ease-in-out;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* Optimize popup rendering */
+.leaflet-popup {
+  will-change: transform;
+}
+
+/* Reduce layout thrashing */
+.leaflet-container {
+  transform: translateZ(0);
+}
