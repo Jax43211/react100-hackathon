@@ -2,7 +2,7 @@ const WEATHER_GOV_API = 'https://api.weather.gov';
 
 export async function fetchWeatherAtLocation(lat, lon) {
   try {
-    // Step 1: Get the grid point for the coordinates
+    // Get the grid point for the coordinates
     const pointResponse = await fetch(
       `${WEATHER_GOV_API}/points/${lat.toFixed(4)},${lon.toFixed(4)}`,
       {
@@ -18,7 +18,7 @@ export async function fetchWeatherAtLocation(lat, lon) {
     
     const pointData = await pointResponse.json();
     
-    // Step 2: Get the observation stations
+    // Get the observation stations
     const observationUrl = pointData.properties.observationStations;
     
     const stationsResponse = await fetch(observationUrl, {
@@ -33,7 +33,7 @@ export async function fetchWeatherAtLocation(lat, lon) {
       throw new Error('No weather station found');
     }
     
-    // Step 3: Get current observations
+    // Get current observations
     const obsResponse = await fetch(`${stationId}/observations/latest`, {
       headers: {
         'User-Agent': '(FlightWeatherTracker)'

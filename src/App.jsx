@@ -7,7 +7,7 @@ function App() {
   const [filteredFlights, setFilteredFlights] = useState(null);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-linear-to-br from-blue-900 via-blue-800 to-blue-900 p-6">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-linear-to-br from-gray-400 to-gray-900 p-6">
       {/* Header */}
       <div className="mb-6 text-center">
         <h1 className="text-4xl font-bold text-white mb-2">
