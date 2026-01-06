@@ -11,7 +11,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: 'https://react100-hackathon.onrender.com',
+    origin: 'https://react100-hackathon-chi.vercel.app',
   })
 );
 
