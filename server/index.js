@@ -18,8 +18,10 @@ app.use(
 const {
   OPENSKY_CLIENT_ID,
   OPENSKY_CLIENT_SECRET,
-  PORT = 4000,
+  PORT,
 } = process.env;
+
+const port = PORT || 10000; // default for local dev
 
 if (!OPENSKY_CLIENT_ID || !OPENSKY_CLIENT_SECRET) {
   console.error('Missing OPENSKY_CLIENT_ID or OPENSKY_CLIENT_SECRET in .env');
@@ -105,6 +107,6 @@ app.get('/api/flights', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend listening on http://localhost:${PORT}`);
+app.listen(port, () => {
+  console.log(`Backend listening on port ${port}`);
 });
