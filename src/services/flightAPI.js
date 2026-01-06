@@ -1,6 +1,6 @@
 const OPENSKY_API = "https://opensky-network.org/api/states/all";
 
-const BACKEND_API = "http://localhost:4000/api/flights";
+const BACKEND_API = "https://react100-hackathon.onrender.com/api/flights";
 
 const US_BOUNDS = {
   north: 49.38, // Northern border (Canada)
